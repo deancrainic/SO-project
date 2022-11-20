@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <errno.h>
 
 typedef struct dirent dirent;
 
@@ -27,6 +28,7 @@ void check_options(char *options);
 int check_option_g_active(char *options);
 void create_symlink_file_size_smaller_than_100KB(dirent *entry, char *new_path);
 void get_file_without_ext(char *file, char *file_without_ext);
+void print_process_status(int pid, int status);
 
 int main(int argc, char* argv[]) {
     check_arguments(argc);
@@ -49,28 +51,52 @@ void open_dir(char *path, char *options) {
                 if (check_file_c(entry->d_name) == 0) {
                     if (check_option_g_active(options) == 0) {
                         pid_t pid;
+                        int wstat;
                         if ((pid = fork()) < 0) {
-                            perror("Fork");
+                            perror("Gcc fork");
                             exit(1);
                         }
                         if (pid == 0) {
-                            char file_without_ext[300] = "";
-                            get_file_without_ext(new_path, file_without_ext);
-                            if (execlp("gcc", "gcc", "-Wall", "-o", file_without_ext, new_path, NULL) == -1) {
-                                perror("Execlp");
-                                exit(1);
-                            }
+                            char file_executable[300] = "";
+                            get_file_without_ext(new_path, file_executable);
+                            strcat(file_executable, "_exec");
+                            execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
+                        }
+                        if (wait(&wstat) == -1 && errno != 0) {
+                            perror("Gcc process");
+                        }
+                        print_process_status(pid, WEXITSTATUS(wstat));
+
+                        if ((pid = fork()) < 0) {
+                            perror("Options fork");
+                            exit(1);
+                        }
+                        if (pid == 0) {
+                            execute_options(entry, options);
                             exit(0);
                         }
-                        int wstat;
-                        wait(&wstat);
+                        if (wait(&wstat) == -1) {
+                            perror("Options process");
+                        }
+                        print_process_status(pid, WEXITSTATUS(wstat));
 
-                        execute_options(entry, options);
-                        create_symlink_file_size_smaller_than_100KB(entry, new_path);
+                        if ((pid = fork()) < 0) {
+                            perror("Symlink fork");
+                            exit(1);
+                        }
+                        if (pid == 0) {
+                            create_symlink_file_size_smaller_than_100KB(entry, new_path);
+                            exit(0);
+                        }
+                        if (wait(&wstat) == -1) {
+                            perror("Symlink process");
+                        }
+                        print_process_status(pid, WEXITSTATUS(wstat));
                     } else {
                         execute_options(entry, options);
                         create_symlink_file_size_smaller_than_100KB(entry, new_path);
                     }
+                    printf("\n");
                 } else if (check_directory(entry->d_name) == 0) {
                     open_dir(new_path, options);
                 }
@@ -252,4 +278,8 @@ void create_symlink_file_size_smaller_than_100KB(dirent *entry, char *new_path) 
             perror("Symlink");
         }
     }
+}
+
+void print_process_status(int pid, int status) {
+    printf("The child process having the pid %d finished with code %d.\n", pid, status);
 }
