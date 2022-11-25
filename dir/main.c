@@ -29,6 +29,7 @@ int check_option_g_active(char *options);
 void create_symlink_file_size_smaller_than_100KB(dirent *entry, char *new_path);
 void get_file_without_ext(char *file, char *file_without_ext);
 void print_process_status(int pid, int status);
+int check_other_options_active(char *options);
 
 int main(int argc, char* argv[]) {
     check_arguments(argc);
@@ -67,18 +68,20 @@ void open_dir(char *path, char *options) {
                         }
                         print_process_status(pid, WEXITSTATUS(wstat));
 
-                        if ((pid = fork()) < 0) {
-                            perror("Options fork");
-                            exit(1);
+                        if (check_other_options_active(options)) {
+                            if ((pid = fork()) < 0) {
+                                perror("Options fork");
+                                exit(1);
+                            }
+                            if (pid == 0) {
+                                execute_options(entry, options);
+                                exit(0);
+                            }
+                            if (wait(&wstat) == -1) {
+                                perror("Options process");
+                            }
+                            print_process_status(pid, WEXITSTATUS(wstat));
                         }
-                        if (pid == 0) {
-                            execute_options(entry, options);
-                            exit(0);
-                        }
-                        if (wait(&wstat) == -1) {
-                            perror("Options process");
-                        }
-                        print_process_status(pid, WEXITSTATUS(wstat));
 
                         if ((pid = fork()) < 0) {
                             perror("Symlink fork");
@@ -224,6 +227,10 @@ void check_options(char *options) {
             }
         }
     }
+}
+
+int check_other_options_active(char *options) {
+    return strlen(options) > 2;
 }
 
 int check_extension(char *file) {
