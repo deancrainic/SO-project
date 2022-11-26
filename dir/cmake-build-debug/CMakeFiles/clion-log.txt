@@ -1,5 +1,0 @@
-/home/dean/.local/share/JetBrains/Toolbox/apps/CLion/ch-0/222.4345.21/bin/cmake/linux/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - Unix Makefiles" -S /home/dean/Documents/SO/SO-project/dir -B /home/dean/Documents/SO/SO-project/dir/cmake-build-debug
-CMake Error: CMake was unable to find a build program corresponding to "Unix Makefiles".  CMAKE_MAKE_PROGRAM is not set.  You probably need to select a different build tool.
-CMake Error: CMAKE_C_COMPILER not set, after EnableLanguage
--- Configuring incomplete, errors occurred!
-See also "/home/dean/Documents/SO/SO-project/dir/cmake-build-debug/CMakeFiles/CMakeOutput.log".

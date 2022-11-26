@@ -69,7 +69,6 @@ void open_dir(char *path, char *options) {
                                 exit(EXIT_FAILURE);
                             }
 
-
                             if((pid2 = fork()) < 0){
                                 perror("Fork error:REDIRECT");
                                 exit(EXIT_FAILURE);
@@ -92,7 +91,6 @@ void open_dir(char *path, char *options) {
                                 perror("DUP2");
                                 exit(EXIT_FAILURE);
                             }
-
                             execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
                         }
                         if (wait(&wstat) == -1 && errno != 0) {
