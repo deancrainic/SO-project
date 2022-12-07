@@ -12,23 +12,33 @@ typedef struct dirent dirent;
 
 const long KB_100 = 102400;
 
-struct stat buff;
+struct stat file_details;
 
+void open_dir(char *path, char *options);
+
+// checking methods
 void check_arguments(int argc);
 int check_extension(char *file);
 int check_file_c(char *file);
 int check_directory(char *file);
-void open_dir(char *path, char *options);
-void execute_options(dirent *entry, char *options);
-void print_access_rights();
 int check_file_size();
 void check_options(char *options);
 int check_option_g_active(char *options);
 int check_option_p_active(char *options);
-void create_symlink_file_size_smaller_than_100KB(dirent *entry, char *new_path);
+int check_other_options_active(char *options);
+
+// utils methods
 void get_file_without_ext(char *file, char *file_without_ext);
 void print_process_status(int pid, int status);
-int check_other_options_active(char *options);
+char *contains_error(const char *line);
+char *contains_warning(const char *line);
+
+// requirements methods
+void execute_options(dirent *file, char *options);
+void print_access_rights();
+void create_symlink_file_size_smaller_than_100KB(dirent *file, char *new_path);
+
+
 
 int main(int argc, char* argv[]) {
     check_arguments(argc);
@@ -45,19 +55,19 @@ void open_dir(char *path, char *options) {
         exit(EXIT_FAILURE);
     }
 
-    dirent *entry;
+    dirent *file;
 
-    while ((entry = readdir(dir)) != NULL) {
+    while ((file = readdir(dir)) != NULL) {
         char new_path[300] = "";
-        sprintf(new_path, "%s/%s", path, entry->d_name);
+        sprintf(new_path, "%s/%s", path, file->d_name);
 
-        if (stat(new_path, &buff) == 1) {
+        if (stat(new_path, &file_details) == 1) {
             perror("Stat");
             exit(1);
         }
 
-        if (check_file_c(entry->d_name) == 1) {                             // daca nu e fisier c
-            if (check_directory(entry->d_name) == 0) {                      // daca este director
+        if (check_file_c(file->d_name) == 1) {                             // daca nu e fisier c
+            if (check_directory(file->d_name) == 0) {                      // daca este director
                 open_dir(new_path, options);
             }
 
@@ -65,117 +75,125 @@ void open_dir(char *path, char *options) {
         }
 
         if (check_option_g_active(options) == 1) {                              // daca optiunea g nu este activa
-            execute_options(entry, options);
-            create_symlink_file_size_smaller_than_100KB(entry, new_path);
+            execute_options(file, options);
+            create_symlink_file_size_smaller_than_100KB(file, new_path);
 
             continue;
         }
 
-        pid_t pid;
-        int wstat;
+        pid_t gcc_pid;
+        int wait_status;
 
         if (check_option_p_active(options) == 1) {                              // daca optiunea p nu este activa
-            if ((pid = fork()) < 0) {
+            if ((gcc_pid = fork()) < 0) {
                 perror("Gcc fork");
-                exit(1);
+                exit(EXIT_FAILURE);
             }
 
-            if (pid == 0) {
+            if (gcc_pid == 0) {
                 char file_executable[300] = "";
                 get_file_without_ext(new_path, file_executable);
                 strcat(file_executable, "_exec");
                 execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
             }
         } else {
-            int pipe_child_to_parent[2];
+            int pipe_filter_to_parent[2];
+            int pipe_gcc_to_filter[2];
 
-            if (pipe(pipe_child_to_parent) < 0) {
-                perror("PIPE_CTP:");
+            if (pipe(pipe_gcc_to_filter) < 0) {
+                perror("PIPE_GTF:");
                 exit(EXIT_FAILURE);
             }
 
-            if ((pid = fork()) < 0) {
-                perror("Gcc fork");
-                exit(1);
+            if (pipe(pipe_filter_to_parent) < 0) {
+                perror("PIPE_FTP:");
+                exit(EXIT_FAILURE);
             }
 
-            if (pid == 0) {
+            if ((gcc_pid = fork()) < 0) {
+                perror("Gcc fork");
+                exit(EXIT_FAILURE);
+            }
+
+            if (gcc_pid == 0) {
+                close(pipe_gcc_to_filter[0]);
+                close(pipe_filter_to_parent[0]);
+                close(pipe_filter_to_parent[1]);
+
                 char file_executable[300] = "";
                 get_file_without_ext(new_path, file_executable);
                 strcat(file_executable, "_exec");
 
-                int pipe_parent_to_child[2];
-                int pid2;
-
-                if (pipe(pipe_parent_to_child) < 0) {
-                    perror("PIPE_PTC:");
-                    exit(EXIT_FAILURE);
-                }
-
-                if ((pid2 = fork()) < 0) {
-                    perror("Fork error:REDIRECT");
-                    exit(EXIT_FAILURE);
-                }
-
-                if (pid2 == 0) {
-                    close(pipe_parent_to_child[1]);
-                    close(pipe_child_to_parent[0]);
-
-                    FILE *stream = fdopen(pipe_parent_to_child[0], "r");
-
-                    char line[500] = "";
-                    char all_errors[5000] = "";
-
-                    while (fgets(line, 500, stream)) {
-                        if (strstr(line, "error") || strstr(line, "warning")) {
-                            strcat(all_errors, line);
-                        }
-                    }
-
-                    all_errors[strlen(all_errors)] = '\0';
-
-                    if ((dup2(pipe_child_to_parent[1], 1)) < 0) {
-                        perror("DUP2");
-                        exit(EXIT_FAILURE);
-                    }
-
-                    printf("%s", all_errors);
-
-                    close(pipe_parent_to_child[0]);
-                    close(pipe_child_to_parent[1]);
-                    exit(0);
-                }
-
-                close(pipe_parent_to_child[0]);
-
-                if ((dup2(pipe_parent_to_child[1], 2)) < 0){
+                if ((dup2(pipe_gcc_to_filter[1], 2)) < 0) {
                     perror("DUP2");
                     exit(EXIT_FAILURE);
                 }
 
-                close(pipe_parent_to_child[1]);
-                close(pipe_child_to_parent[0]);
-                close(pipe_child_to_parent[1]);
                 execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
             }
 
-            FILE *stream = fdopen(pipe_child_to_parent[0], "r");
+            pid_t filter_pid;
+
+            if ((filter_pid = fork()) < 0) {
+                perror("Gcc fork");
+                exit(EXIT_FAILURE);
+            }
+
+            if (filter_pid == 0) {
+                close(pipe_gcc_to_filter[1]);
+                close(pipe_filter_to_parent[0]);
+
+                FILE *stream = fdopen(pipe_gcc_to_filter[0], "r");
+
+                char line[500] = "";
+                char all_errors[5000] = "";
+
+                while (fgets(line, 500, stream)) {
+                    if (contains_error(line) || contains_warning(line)) {
+                        strcat(all_errors, line);
+                    }
+                }
+
+                all_errors[strlen(all_errors)] = '\0';
+
+                if ((dup2(pipe_filter_to_parent[1], 1)) < 0) {
+                    perror("DUP2");
+                    exit(EXIT_FAILURE);
+                }
+
+                printf("%s", all_errors);
+
+                close(pipe_gcc_to_filter[0]);
+                close(pipe_filter_to_parent[1]);
+                exit(EXIT_SUCCESS);
+            }
+
+            close(pipe_filter_to_parent[1]);
+            close(pipe_gcc_to_filter[0]);
+            close(pipe_gcc_to_filter[1]);
+
+            FILE *stream = fdopen(pipe_filter_to_parent[0], "r");
             char error_line[500];
             int error_counter = 0;
             int warning_counter = 0;
             double result;
 
-            close(pipe_child_to_parent[1]);
             while (fgets(error_line, 500, stream)) {
-                if (strstr(error_line, "error")) {
+                if (contains_error(error_line)) {
                     error_counter++;
                 }
 
-                if (strstr(error_line, "warning")) {
+                if (contains_warning(error_line)) {
                     warning_counter++;
                 }
             }
-            close(pipe_child_to_parent[0]);
+
+            close(pipe_filter_to_parent[0]);
+
+            if (waitpid(filter_pid, &wait_status, 0) == -1 && errno != 0) {
+                perror("Filter process");
+            }
+            print_process_status(filter_pid, WEXITSTATUS(wait_status));
 
             if (error_counter >= 1) {
                 result = 1;
@@ -187,68 +205,76 @@ void open_dir(char *path, char *options) {
                 result = 2;
             }
 
-            printf("Rezultatul este: %.2f\n", result);
+            printf("Result: %.2f\n", result);
         }
 
-        if (wait(&wstat) == -1 && errno != 0) {
+        if (waitpid(gcc_pid, &wait_status, 0) == -1 && errno != 0) {
             perror("Gcc process");
         }
-        print_process_status(pid, WEXITSTATUS(wstat));
+        print_process_status(gcc_pid, WEXITSTATUS(wait_status));
 
         if (check_other_options_active(options) == 0) {
-            if ((pid = fork()) < 0) {
+            pid_t exec_options_pid;
+
+            if ((exec_options_pid = fork()) < 0) {
                 perror("Options fork");
-                exit(1);
+                exit(EXIT_FAILURE);
             }
 
-            if (pid == 0) {
-                execute_options(entry, options);
-                exit(0);
+            if (exec_options_pid == 0) {
+                execute_options(file, options);
+                exit(EXIT_SUCCESS);
             }
 
-            if (wait(&wstat) == -1) {
-                perror("Options process");
+            if (waitpid(exec_options_pid, &wait_status, 0) == -1 && errno != 0) {
+                perror("Exec options process");
             }
-            print_process_status(pid, WEXITSTATUS(wstat));
+            print_process_status(exec_options_pid, WEXITSTATUS(wait_status));
         }
 
-        if ((pid = fork()) < 0) {
+        pid_t symlink_pid;
+
+        if ((symlink_pid = fork()) < 0) {
             perror("Symlink fork");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
 
-        if (pid == 0) {
-            create_symlink_file_size_smaller_than_100KB(entry, new_path);
-            exit(0);
+        if (symlink_pid == 0) {
+            create_symlink_file_size_smaller_than_100KB(file, new_path);
+            exit(EXIT_SUCCESS);
         }
 
-        if (wait(&wstat) == -1) {
+        if (waitpid(symlink_pid, &wait_status, 0) == -1 && errno != 0) {
             perror("Symlink process");
         }
-        print_process_status(pid, WEXITSTATUS(wstat));
+        print_process_status(symlink_pid, WEXITSTATUS(wait_status));
 
         printf("\n");
     }
     closedir(dir);
 }
 
-void execute_options(dirent *entry, char *options) {
+char *contains_warning(const char *line) { return strstr(line, "warning"); }
+
+char *contains_error(const char *line) { return strstr(line, "error"); }
+
+void execute_options(dirent *file, char *options) {
     for (int i = 1; i < strlen(options); i++) {
         switch (options[i]) {
             case 'n':
-                printf("File: %s\n", entry->d_name);
+                printf("File: %s\n", file->d_name);
                 break;
             case 'u':
-                printf("User identifier: %u\n", buff.st_uid);
+                printf("User identifier: %u\n", file_details.st_uid);
                 break;
             case 'a':
                 print_access_rights();
                 break;
             case 'd':
-                printf("Size: %ld bytes\n", buff.st_size);
+                printf("Size: %ld bytes\n", file_details.st_size);
                 break;
             case 'c':
-                printf("Links counter: %ld\n", buff.st_nlink);
+                printf("Links counter: %ld\n", file_details.st_nlink);
                 break;
             case 'g':
             case 'p':
@@ -264,19 +290,19 @@ void print_access_rights() {
     printf("ACCESS RIGHTS:\n");
     printf("USER:\n");
 
-    if ((buff.st_mode & S_IRUSR) == 0) {
+    if ((file_details.st_mode & S_IRUSR) == 0) {
         printf("Read: NO\n");
     } else {
         printf("Read: YES\n");
     }
 
-    if ((buff.st_mode & S_IWUSR) == 0) {
+    if ((file_details.st_mode & S_IWUSR) == 0) {
         printf("Write: NO\n");
     } else {
         printf("Write: YES\n");
     }
 
-    if ((buff.st_mode & S_IXUSR) == 0) {
+    if ((file_details.st_mode & S_IXUSR) == 0) {
         printf("Execute: NO\n");
     } else {
         printf("Execute: YES\n");
@@ -284,19 +310,19 @@ void print_access_rights() {
 
     printf("GROUP:\n");
 
-    if ((buff.st_mode & S_IRGRP) == 0) {
+    if ((file_details.st_mode & S_IRGRP) == 0) {
         printf("Read: NO\n");
     } else {
         printf("Read: YES\n");
     }
 
-    if ((buff.st_mode & S_IWGRP) == 0) {
+    if ((file_details.st_mode & S_IWGRP) == 0) {
         printf("Write: NO\n");
     } else {
         printf("Write: YES\n");
     }
 
-    if ((buff.st_mode & S_IXGRP) == 0) {
+    if ((file_details.st_mode & S_IXGRP) == 0) {
         printf("Execute: NO\n");
     } else {
         printf("Execute: YES\n");
@@ -304,19 +330,19 @@ void print_access_rights() {
 
     printf("OTHERS:\n");
 
-    if ((buff.st_mode & S_IROTH) == 0) {
+    if ((file_details.st_mode & S_IROTH) == 0) {
         printf("Read: NO\n");
     } else {
         printf("Read: YES\n");
     }
 
-    if ((buff.st_mode & S_IWOTH) == 0) {
+    if ((file_details.st_mode & S_IWOTH) == 0) {
         printf("Write: NO\n");
     } else {
         printf("Write: YES\n");
     }
 
-    if ((buff.st_mode & S_IXOTH) == 0) {
+    if ((file_details.st_mode & S_IXOTH) == 0) {
         printf("Execute: NO\n");
     } else {
         printf("Execute: YES\n");
@@ -331,8 +357,19 @@ void check_arguments(int argc) {
 }
 
 void check_options(char *options) {
+    int g_active = 0;
+    int p_active = 0;
+
     for (int i = 0; i < strlen(options); i++) {
         int counter = 1;
+
+        if (options[i] == 'g') {
+            g_active++;
+        }
+
+        if (options[i] == 'p') {
+            p_active++;
+        }
 
         for (int j = i + 1; j < strlen(options); j++) {
             if (options[i] == options[j]) {
@@ -341,9 +378,14 @@ void check_options(char *options) {
 
             if (counter > 1) {
                 printf("Cannot write the same option twice.\n");
-                exit(1);
+                exit(EXIT_FAILURE);
             }
         }
+    }
+
+    if (g_active == 0 && p_active > 0) {
+        printf("Cannot use p without g.\n");
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -362,7 +404,7 @@ int check_extension(char *file) {
 }
 
 int check_file_c(char *file) {
-    if (S_ISREG(buff.st_mode) && (check_extension(file) == 0)) {
+    if (S_ISREG(file_details.st_mode) && (check_extension(file) == 0)) {
         return 0;
     }
 
@@ -370,15 +412,15 @@ int check_file_c(char *file) {
 }
 
 int check_directory(char *file) {
-    if (S_ISDIR(buff.st_mode) && (strcmp(file, ".") != 0) && (strcmp(file, "..") != 0)) {
+    if (S_ISDIR(file_details.st_mode) && (strcmp(file, ".") != 0) && (strcmp(file, "..") != 0)) {
         return 0;
     }
 
     return 1;
 }
 
-int check_file_size() { // return 0 for files smaller than 100KB
-    return buff.st_size >= KB_100;
+int check_file_size() {
+    return file_details.st_size >= KB_100;
 }
 
 void get_file_without_ext(char *file, char *file_without_ext) {
@@ -401,11 +443,11 @@ int check_option_p_active(char *options) {
     return p == NULL;
 }
 
-void create_symlink_file_size_smaller_than_100KB(dirent *entry, char *new_path) {
+void create_symlink_file_size_smaller_than_100KB(dirent *file, char *new_path) {
     if (check_file_size() == 0) {
         char new_path_without_ext[300] = "";
         get_file_without_ext(new_path, new_path_without_ext);
-        if (symlink(entry->d_name, new_path_without_ext) != 0) {
+        if (symlink(file->d_name, new_path_without_ext) != 0) {
             perror("Symlink");
         }
     }
