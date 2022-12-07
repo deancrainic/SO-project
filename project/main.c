@@ -56,43 +56,102 @@ void open_dir(char *path, char *options) {
                             perror("Gcc fork");
                             exit(1);
                         }
-                        if (pid == 0) {
-                            char file_executable[300] = "";
-                            get_file_without_ext(new_path, file_executable);
-                            strcat(file_executable, "_exec");
 
-                            int pfd[2];
-                            int pid2;
+                        if (check_option_p_active(options) == 0) {
+                            int pipe_child_to_parent[2];
 
-                            if(pipe(pfd)<0){
-                                perror("PIPE:");
+                            if(pipe(pipe_child_to_parent) < 0) {
+                                perror("PIPE_CTP:");
                                 exit(EXIT_FAILURE);
                             }
 
-                            if((pid2 = fork()) < 0){
-                                perror("Fork error:REDIRECT");
-                                exit(EXIT_FAILURE);
+                            if (pid == 0) {
+                                char file_executable[300] = "";
+                                get_file_without_ext(new_path, file_executable);
+                                strcat(file_executable, "_exec");
+
+                                int pipe_parent_to_child[2];
+                                int pid2;
+
+                                if(pipe(pipe_parent_to_child) < 0) {
+                                    perror("PIPE_PTC:");
+                                    exit(EXIT_FAILURE);
+                                }
+
+                                if((pid2 = fork()) < 0) {
+                                    perror("Fork error:REDIRECT");
+                                    exit(EXIT_FAILURE);
+                                }
+
+                                if(pid2 == 0) {
+                                    close(pipe_parent_to_child[1]);
+                                    close(pipe_child_to_parent[0]);
+                                    FILE *stream;
+                                    char string[500] = "";
+                                    char all_errors[5000] = "";
+
+                                    stream = fdopen(pipe_parent_to_child[0], "r");
+
+                                    while (fgets(string, 500, stream)) {
+                                        if (strstr(string, "error") || strstr(string, "warning")) {
+                                            strcat(all_errors, string);
+                                        }
+                                    }
+
+                                    all_errors[strlen(all_errors)] = '\0';
+
+//                                    FILE *fis = fopen("file.txt", "a");
+//                                    fprintf(fis, "%s", all_errors);
+
+//                                    write(pipe_child_to_parent[1], all_errors, strlen(all_errors));
+
+                                    if ((dup2(pipe_child_to_parent[1], 1)) < 0) {
+                                        perror("DUP2");
+                                        exit(EXIT_FAILURE);
+                                    }
+//                                    fclose(fis);
+
+                                    printf("%s", all_errors);
+
+                                    close(pipe_parent_to_child[0]);
+                                    close(pipe_child_to_parent[1]);
+                                    exit(0);
+                                }
+
+                                close(pipe_parent_to_child[0]);
+
+                                if ((dup2(pipe_parent_to_child[1], 2)) < 0){
+                                    perror("DUP2");
+                                    exit(EXIT_FAILURE);
+                                }
+
+                                close(pipe_parent_to_child[1]);
+                                execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
                             }
 
-                            if(pid2 == 0){
-                                close(pfd[1]);
-                                FILE *stream;
-                                char string[500];
-                                stream=fdopen(pfd[0],"r");
-                                fgets(string, 500, stream);
+                            FILE *stream = fdopen(pipe_child_to_parent[0], "r");
+                            char string[500];
 
-                                FILE *fis = fopen("file.txt", "w");
-                                fprintf(fis, "%s", string);
-                                close(pfd[0]);
-                                exit(0);
+                            close(pipe_child_to_parent[1]);
+                            FILE *fis = fopen("file.txt", "a");
+                            fprintf(fis, "%s\n", "aaaaabbb");
+                            if (fgets(string, 500, stream) == NULL) {
+                                fprintf(fis, "%s", "E null\n");
                             }
-                            close(pfd[0]);
-                            if((dup2(pfd[1],1)) < 0){
-                                perror("DUP2");
-                                exit(EXIT_FAILURE);
+                            while (fgets(string, 500, stream)) {
+                                fprintf(fis, "%s\n", "aaaaa");
                             }
-                            execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
+                            fclose(fis);
+                            close(pipe_child_to_parent[0]);
+                        } else {
+                            if (pid == 0) {
+                                char file_executable[300] = "";
+                                get_file_without_ext(new_path, file_executable);
+                                strcat(file_executable, "_exec");
+                                execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
+                            }
                         }
+
                         if (wait(&wstat) == -1 && errno != 0) {
                             perror("Gcc process");
                         }

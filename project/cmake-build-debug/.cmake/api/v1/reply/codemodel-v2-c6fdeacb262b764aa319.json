@@ -49,8 +49,8 @@
 	"kind" : "codemodel",
 	"paths" : 
 	{
-		"build" : "/home/dean/Documents/SO/SO-project/project/cmake-build-debug",
-		"source" : "/home/dean/Documents/SO/SO-project/project"
+		"build" : "/home/dean/Documents/SO/project/project/cmake-build-debug",
+		"source" : "/home/dean/Documents/SO/project/project"
 	},
 	"version" : 
 	{
