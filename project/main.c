@@ -40,168 +40,196 @@ int main(int argc, char* argv[]) {
 void open_dir(char *path, char *options) {
     DIR *dir = opendir(path);
 
-    if (dir) {
-        dirent *entry;
+    if (!dir) {
+        perror("Open directory");
+        exit(EXIT_FAILURE);
+    }
 
-        while ((entry = readdir(dir)) != NULL) {
-            char new_path[300]="";
-            sprintf(new_path, "%s/%s", path, entry->d_name);
+    dirent *entry;
 
-            if (stat(new_path, &buff) == 0) {
-                if (check_file_c(entry->d_name) == 0) {
-                    if (check_option_g_active(options) == 0) {
-                        pid_t pid;
-                        int wstat;
-                        if ((pid = fork()) < 0) {
-                            perror("Gcc fork");
-                            exit(1);
-                        }
+    while ((entry = readdir(dir)) != NULL) {
+        char new_path[300] = "";
+        sprintf(new_path, "%s/%s", path, entry->d_name);
 
-                        if (check_option_p_active(options) == 0) {
-                            int pipe_child_to_parent[2];
+        if (stat(new_path, &buff) == 1) {
+            perror("Stat");
+            exit(1);
+        }
 
-                            if(pipe(pipe_child_to_parent) < 0) {
-                                perror("PIPE_CTP:");
-                                exit(EXIT_FAILURE);
-                            }
+        if (check_file_c(entry->d_name) == 1) {                             // daca nu e fisier c
+            if (check_directory(entry->d_name) == 0) {                      // daca este director
+                open_dir(new_path, options);
+            }
 
-                            if (pid == 0) {
-                                char file_executable[300] = "";
-                                get_file_without_ext(new_path, file_executable);
-                                strcat(file_executable, "_exec");
+            continue;
+        }
 
-                                int pipe_parent_to_child[2];
-                                int pid2;
+        if (check_option_g_active(options) == 1) {                              // daca optiunea g nu este activa
+            execute_options(entry, options);
+            create_symlink_file_size_smaller_than_100KB(entry, new_path);
 
-                                if(pipe(pipe_parent_to_child) < 0) {
-                                    perror("PIPE_PTC:");
-                                    exit(EXIT_FAILURE);
-                                }
+            continue;
+        }
 
-                                if((pid2 = fork()) < 0) {
-                                    perror("Fork error:REDIRECT");
-                                    exit(EXIT_FAILURE);
-                                }
+        pid_t pid;
+        int wstat;
 
-                                if(pid2 == 0) {
-                                    close(pipe_parent_to_child[1]);
-                                    close(pipe_child_to_parent[0]);
-                                    FILE *stream;
-                                    char string[500] = "";
-                                    char all_errors[5000] = "";
-
-                                    stream = fdopen(pipe_parent_to_child[0], "r");
-
-                                    while (fgets(string, 500, stream)) {
-                                        if (strstr(string, "error") || strstr(string, "warning")) {
-                                            strcat(all_errors, string);
-                                        }
-                                    }
-
-                                    all_errors[strlen(all_errors)] = '\0';
-
-//                                    FILE *fis = fopen("file.txt", "a");
-//                                    fprintf(fis, "%s", all_errors);
-
-//                                    write(pipe_child_to_parent[1], all_errors, strlen(all_errors));
-
-                                    if ((dup2(pipe_child_to_parent[1], 1)) < 0) {
-                                        perror("DUP2");
-                                        exit(EXIT_FAILURE);
-                                    }
-//                                    fclose(fis);
-
-                                    printf("%s", all_errors);
-
-                                    close(pipe_parent_to_child[0]);
-                                    close(pipe_child_to_parent[1]);
-                                    exit(0);
-                                }
-
-                                close(pipe_parent_to_child[0]);
-
-                                if ((dup2(pipe_parent_to_child[1], 2)) < 0){
-                                    perror("DUP2");
-                                    exit(EXIT_FAILURE);
-                                }
-
-                                close(pipe_parent_to_child[1]);
-                                execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
-                            }
-
-                            FILE *stream = fdopen(pipe_child_to_parent[0], "r");
-                            char string[500];
-
-                            close(pipe_child_to_parent[1]);
-                            FILE *fis = fopen("file.txt", "a");
-                            fprintf(fis, "%s\n", "aaaaabbb");
-                            if (fgets(string, 500, stream) == NULL) {
-                                fprintf(fis, "%s", "E null\n");
-                            }
-                            while (fgets(string, 500, stream)) {
-                                fprintf(fis, "%s\n", "aaaaa");
-                            }
-                            fclose(fis);
-                            close(pipe_child_to_parent[0]);
-                        } else {
-                            if (pid == 0) {
-                                char file_executable[300] = "";
-                                get_file_without_ext(new_path, file_executable);
-                                strcat(file_executable, "_exec");
-                                execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
-                            }
-                        }
-
-                        if (wait(&wstat) == -1 && errno != 0) {
-                            perror("Gcc process");
-                        }
-                        print_process_status(pid, WEXITSTATUS(wstat));
-
-                        if (check_other_options_active(options)) {
-                            if ((pid = fork()) < 0) {
-                                perror("Options fork");
-                                exit(1);
-                            }
-                            if (pid == 0) {
-                                execute_options(entry, options);
-                                exit(0);
-                            }
-                            if (wait(&wstat) == -1) {
-                                perror("Options process");
-                            }
-                            print_process_status(pid, WEXITSTATUS(wstat));
-                        }
-
-                        if ((pid = fork()) < 0) {
-                            perror("Symlink fork");
-                            exit(1);
-                        }
-                        if (pid == 0) {
-                            create_symlink_file_size_smaller_than_100KB(entry, new_path);
-                            exit(0);
-                        }
-                        if (wait(&wstat) == -1) {
-                            perror("Symlink process");
-                        }
-                        print_process_status(pid, WEXITSTATUS(wstat));
-                    } else {
-                        execute_options(entry, options);
-                        create_symlink_file_size_smaller_than_100KB(entry, new_path);
-                    }
-                    printf("\n");
-                } else if (check_directory(entry->d_name) == 0) {
-                    open_dir(new_path, options);
-                }
-            } else {
-                perror("Stat");
+        if (check_option_p_active(options) == 1) {                              // daca optiunea p nu este activa
+            if ((pid = fork()) < 0) {
+                perror("Gcc fork");
                 exit(1);
             }
+
+            if (pid == 0) {
+                char file_executable[300] = "";
+                get_file_without_ext(new_path, file_executable);
+                strcat(file_executable, "_exec");
+                execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
+            }
+        } else {
+            int pipe_child_to_parent[2];
+
+            if (pipe(pipe_child_to_parent) < 0) {
+                perror("PIPE_CTP:");
+                exit(EXIT_FAILURE);
+            }
+
+            if ((pid = fork()) < 0) {
+                perror("Gcc fork");
+                exit(1);
+            }
+
+            if (pid == 0) {
+                char file_executable[300] = "";
+                get_file_without_ext(new_path, file_executable);
+                strcat(file_executable, "_exec");
+
+                int pipe_parent_to_child[2];
+                int pid2;
+
+                if (pipe(pipe_parent_to_child) < 0) {
+                    perror("PIPE_PTC:");
+                    exit(EXIT_FAILURE);
+                }
+
+                if ((pid2 = fork()) < 0) {
+                    perror("Fork error:REDIRECT");
+                    exit(EXIT_FAILURE);
+                }
+
+                if (pid2 == 0) {
+                    close(pipe_parent_to_child[1]);
+                    close(pipe_child_to_parent[0]);
+
+                    FILE *stream = fdopen(pipe_parent_to_child[0], "r");
+
+                    char line[500] = "";
+                    char all_errors[5000] = "";
+
+                    while (fgets(line, 500, stream)) {
+                        if (strstr(line, "error") || strstr(line, "warning")) {
+                            strcat(all_errors, line);
+                        }
+                    }
+
+                    all_errors[strlen(all_errors)] = '\0';
+
+                    if ((dup2(pipe_child_to_parent[1], 1)) < 0) {
+                        perror("DUP2");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    printf("%s", all_errors);
+
+                    close(pipe_parent_to_child[0]);
+                    close(pipe_child_to_parent[1]);
+                    exit(0);
+                }
+
+                close(pipe_parent_to_child[0]);
+
+                if ((dup2(pipe_parent_to_child[1], 2)) < 0){
+                    perror("DUP2");
+                    exit(EXIT_FAILURE);
+                }
+
+                close(pipe_parent_to_child[1]);
+                close(pipe_child_to_parent[0]);
+                close(pipe_child_to_parent[1]);
+                execlp("gcc", "gcc", "-Wall", "-o", file_executable, new_path, NULL);
+            }
+
+            FILE *stream = fdopen(pipe_child_to_parent[0], "r");
+            char error_line[500];
+            int error_counter = 0;
+            int warning_counter = 0;
+            double result;
+
+            close(pipe_child_to_parent[1]);
+            while (fgets(error_line, 500, stream)) {
+                if (strstr(error_line, "error")) {
+                    error_counter++;
+                }
+
+                if (strstr(error_line, "warning")) {
+                    warning_counter++;
+                }
+            }
+            close(pipe_child_to_parent[0]);
+
+            if (error_counter >= 1) {
+                result = 1;
+            } else if (warning_counter == 0) {
+                result = 10;
+            } else if (warning_counter <= 10) {
+                result = 2 + 8 * (10 - warning_counter) / 10.0;
+            } else {
+                result = 2;
+            }
+
+            printf("Rezultatul este: %.2f\n", result);
         }
-        closedir(dir);
-    } else {
-        perror("Open directory");
-        exit(1);
+
+        if (wait(&wstat) == -1 && errno != 0) {
+            perror("Gcc process");
+        }
+        print_process_status(pid, WEXITSTATUS(wstat));
+
+        if (check_other_options_active(options) == 0) {
+            if ((pid = fork()) < 0) {
+                perror("Options fork");
+                exit(1);
+            }
+
+            if (pid == 0) {
+                execute_options(entry, options);
+                exit(0);
+            }
+
+            if (wait(&wstat) == -1) {
+                perror("Options process");
+            }
+            print_process_status(pid, WEXITSTATUS(wstat));
+        }
+
+        if ((pid = fork()) < 0) {
+            perror("Symlink fork");
+            exit(1);
+        }
+
+        if (pid == 0) {
+            create_symlink_file_size_smaller_than_100KB(entry, new_path);
+            exit(0);
+        }
+
+        if (wait(&wstat) == -1) {
+            perror("Symlink process");
+        }
+        print_process_status(pid, WEXITSTATUS(wstat));
+
+        printf("\n");
     }
+    closedir(dir);
 }
 
 void execute_options(dirent *entry, char *options) {
@@ -223,7 +251,6 @@ void execute_options(dirent *entry, char *options) {
                 printf("Links counter: %ld\n", buff.st_nlink);
                 break;
             case 'g':
-                continue;
             case 'p':
                 continue;
             default:
@@ -321,7 +348,7 @@ void check_options(char *options) {
 }
 
 int check_other_options_active(char *options) {
-    return strlen(options) > 2;
+    return strlen(options) <= 2;
 }
 
 int check_extension(char *file) {
